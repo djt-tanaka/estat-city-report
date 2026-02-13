@@ -14,6 +14,7 @@ export default defineConfig({
         "src/types.ts",
         "src/scoring/types.ts",
         "src/reinfo/types.ts",
+        "src/interactive/prompts.ts",
       ],
       thresholds: {
         statements: 80,

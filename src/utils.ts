@@ -1,6 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
+/** 後方互換: normalize/label.ts からre-export */
+export { normalizeLabel, normalizeLabelWithKana } from "./normalize/label";
+
 export function arrify<T>(value: T | T[] | undefined | null): T[] {
   if (value === undefined || value === null) {
     return [];
@@ -23,33 +26,6 @@ export function textFrom(value: unknown): string {
     return textFrom((value as Record<string, unknown>).$);
   }
   return "";
-}
-
-const FULL_WIDTH_MAP: Record<string, string> = {
-  "０": "0",
-  "１": "1",
-  "２": "2",
-  "３": "3",
-  "４": "4",
-  "５": "5",
-  "６": "6",
-  "７": "7",
-  "８": "8",
-  "９": "9",
-  "－": "-",
-  "〜": "~",
-  "～": "~",
-  "　": " "
-};
-
-export function normalizeLabel(input: string): string {
-  const half = input
-    .split("")
-    .map((char) => FULL_WIDTH_MAP[char] ?? char)
-    .join("")
-    .toLowerCase();
-
-  return half.replace(/\s+/g, "").trim();
 }
 
 export function parseNumber(value: unknown): number | null {

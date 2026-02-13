@@ -1,6 +1,8 @@
 import { CliError } from "../errors";
 import { DATASETS } from "../config/datasets";
 import { arrify, normalizeLabel, parseNumber, textFrom, toCdParamName } from "../utils";
+import { normalizeLabelWithKana } from "../normalize/label";
+import { findByReading } from "../normalize/readings";
 
 export interface ClassItem {
   code: string;
@@ -175,6 +177,37 @@ function resolveSingleCity(city: string, areaEntries: AreaEntry[]): CityResoluti
       undefined,
       3
     );
+  }
+
+  // カナ正規化一致: カタカナ→ひらがな統一後に比較
+  const kanaNormInput = normalizeLabelWithKana(city);
+  const kanaStrippedInput = normalizeLabelWithKana(stripPrefecture(city));
+  const kanaMatch = areaEntries.filter((entry) => {
+    const kanaNormName = normalizeLabelWithKana(entry.name);
+    return kanaNormName === kanaNormInput || kanaNormName === kanaStrippedInput;
+  });
+
+  if (kanaMatch.length === 1) {
+    return {
+      input: city,
+      resolvedName: kanaMatch[0].name,
+      code: kanaMatch[0].code,
+    };
+  }
+
+  // 読み仮名一致: ひらがな/カタカナ入力を読み仮名DBで逆引き
+  const readingCandidates = findByReading(kanaNormInput);
+  if (readingCandidates.length > 0) {
+    const readingMatch = areaEntries.filter((entry) =>
+      readingCandidates.includes(entry.name),
+    );
+    if (readingMatch.length === 1) {
+      return {
+        input: city,
+        resolvedName: readingMatch[0].name,
+        code: readingMatch[0].code,
+      };
+    }
   }
 
   const partial = areaEntries.filter((entry) => {

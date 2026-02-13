@@ -152,6 +152,34 @@ describe("resolveCities", () => {
   it("存在しない都市はエラーを投げる", () => {
     expect(() => resolveCities(["存在しない市"], entries)).toThrow(CliError);
   });
+
+  it("ひらがな入力で解決する（読み仮名一致）", () => {
+    const result = resolveCities(["しんじゅくく"], entries);
+    expect(result).toHaveLength(1);
+    expect(result[0].resolvedName).toBe("新宿区");
+    expect(result[0].code).toBe("13104");
+  });
+
+  it("カタカナ入力で解決する（カナ正規化→読み仮名一致）", () => {
+    const result = resolveCities(["シンジュクク"], entries);
+    expect(result).toHaveLength(1);
+    expect(result[0].resolvedName).toBe("新宿区");
+    expect(result[0].code).toBe("13104");
+  });
+
+  it("ひらがな入力で複数都市を解決する", () => {
+    const result = resolveCities(["しぶやく", "めぐろく"], entries);
+    expect(result).toHaveLength(2);
+    expect(result[0].resolvedName).toBe("渋谷区");
+    expect(result[1].resolvedName).toBe("目黒区");
+  });
+
+  it("カタカナ入力で横浜市を解決する", () => {
+    const result = resolveCities(["ヨコハマシ"], entries);
+    expect(result).toHaveLength(1);
+    expect(result[0].resolvedName).toBe("横浜市");
+    expect(result[0].code).toBe("14100");
+  });
 });
 
 describe("resolveLatestTime", () => {

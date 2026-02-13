@@ -27,4 +27,19 @@ export const DATASETS = {
     statsDataId: "0000020211",
     label: "社会・人口統計体系 K安全（市区町村）",
   },
+  /**
+   * 国勢調査 地域メッシュ統計（3次メッシュ）。
+   * --mesh-stats-id で上書き可能。
+   * 実際のstatsDataIdはe-Stat検索で確定する必要がある。
+   * `estat-report search --keyword "地域メッシュ 人口"` で検索推奨。
+   */
+  meshPopulation: {
+    statsDataId: "0003448233",
+    label: "国勢調査 地域メッシュ統計 人口（令和2年）",
+    selectors: {
+      classId: "cat01",
+      totalCode: "000",
+      kidsCode: "001",
+    },
+  },
 } as const satisfies Record<string, DatasetPreset>;
