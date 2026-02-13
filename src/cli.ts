@@ -19,9 +19,14 @@ import { buildCrimeData } from "./estat/crime-data";
 import { mergeCrimeIntoScoringInput } from "./estat/merge-crime-scoring";
 import { buildDisasterData } from "./reinfo/disaster-data";
 import { mergeDisasterIntoScoringInput } from "./reinfo/merge-disaster-scoring";
-import { ensureDir } from "./utils";
+import { ensureDir, resolveOutPath } from "./utils";
 import { DATASETS } from "./config/datasets";
 import { inspectStatsData, formatInspectResult } from "./estat/inspect";
+import { buildMeshData, meshDataToReportRows, meshRowsToScoringInput } from "./mesh/mesh-data";
+import { loadMeshDataFromCache, saveMeshDataToCache } from "./mesh/cache";
+import { isValidMeshCode, meshCodesInRadius } from "./mesh/geometry";
+import { resolveStations } from "./station/resolver";
+import { buildStationAreaRows, stationRowsToScoringInput } from "./station/area-builder";
 
 dotenv.config();
 
@@ -136,8 +141,12 @@ program
 
 program
   .command("report")
-  .description("市区町村比較レポートをPDF出力")
-  .requiredOption("--cities <list>", "市区町村名をカンマ区切りで指定")
+  .description("市区町村・メッシュ・駅圏比較レポートをPDF出力")
+  .option("--cities <list>", "市区町村名をカンマ区切りで指定")
+  .option("--mesh <codes>", "メッシュコードをカンマ区切りで指定（8桁=3次メッシュ）")
+  .option("--stations <list>", "駅名をカンマ区切りで指定（例: 渋谷,新宿）")
+  .option("--radius <meters>", "駅圏の半径（メートル）", "1000")
+  .option("--mesh-stats-id <id>", "メッシュ統計の statsDataId")
   .option("--statsDataId <id>", "統計表ID")
   .option("--profile <name>", "profile名 (estat.config.json)")
   .option("--out <path>", "PDF出力先")
@@ -155,9 +164,14 @@ program
   .option("--no-crime", "犯罪統計データなしで実行")
   .option("--crime-stats-id <id>", "犯罪統計の statsDataId")
   .option("--no-disaster", "災害リスクデータなしで実行")
+  .option("--interactive", "インタラクティブモードで実行")
   .action(
     async (options: {
-      cities: string;
+      cities?: string;
+      mesh?: string;
+      stations?: string;
+      radius: string;
+      meshStatsId?: string;
       statsDataId?: string;
       profile?: string;
       out?: string;
@@ -175,8 +189,62 @@ program
       crime: boolean;
       crimeStatsId?: string;
       disaster: boolean;
+      interactive?: boolean;
     }) => {
+      // インタラクティブモード
+      if (options.interactive) {
+        const { runInteractiveSession } = await import("./interactive/prompts");
+        const session = await runInteractiveSession();
+
+        switch (session.mode) {
+          case "municipality":
+            options.cities = session.targets.join(",");
+            break;
+          case "mesh":
+            options.mesh = session.targets.join(",");
+            break;
+          case "station":
+            options.stations = session.targets.join(",");
+            if (session.radius !== undefined) {
+              options.radius = String(session.radius);
+            }
+            break;
+        }
+        options.scored = session.scored;
+        options.preset = session.preset;
+      }
+
+      const modeCount = [options.cities, options.mesh, options.stations].filter(Boolean).length;
+      if (modeCount === 0) {
+        throw new CliError("--cities, --mesh, --stations のいずれかを指定してください", [
+          "市区町村モード:  --cities \"新宿区,渋谷区\"",
+          "メッシュモード:   --mesh \"53394525,53394526\"",
+          "駅圏モード:      --stations \"渋谷,新宿\" --radius 1000",
+          "インタラクティブ: --interactive",
+        ]);
+      }
+      if (modeCount > 1) {
+        throw new CliError("--cities, --mesh, --stations は同時に指定できません", [
+          "いずれか1つのモードを選択してください。",
+        ]);
+      }
+
       const appId = requireAppId();
+      const client = new EstatApiClient(appId);
+
+      // メッシュモード
+      if (options.mesh) {
+        await handleMeshReport(client, options);
+        return;
+      }
+
+      // 駅圏モード
+      if (options.stations) {
+        await handleStationReport(client, options);
+        return;
+      }
+
+      // 市区町村モード（既存フロー）
       const config = await loadConfig();
       const resolved = resolveStatsDataId({
         explicitStatsDataId: options.statsDataId,
@@ -184,7 +252,7 @@ program
         config
       });
 
-      const cityNames = options.cities
+      const cityNames = options.cities!
         .split(",")
         .map((name) => name.trim())
         .filter(Boolean);
@@ -193,7 +261,6 @@ program
         throw new CliError("--cities が空です", ["例: --cities \"新宿区,横浜市,大阪市\""]);
       }
 
-      const client = new EstatApiClient(appId);
       const metaInfo = await loadMetaInfoWithCache(client, resolved.statsDataId);
 
       const reportData = await buildReportData({
@@ -367,6 +434,290 @@ program
       console.log(`0〜14: ${reportData.kidsLabel}(${reportData.ageSelection.kids.code})`);
     }
   );
+
+/** メッシュモードのレポート生成 */
+async function handleMeshReport(
+  client: EstatApiClient,
+  options: {
+    mesh?: string;
+    meshStatsId?: string;
+    out?: string;
+    classId?: string;
+    totalCode?: string;
+    kidsCode?: string;
+    timeCode?: string;
+    scored?: boolean;
+    preset: string;
+  },
+): Promise<void> {
+  const meshCodes = options.mesh!
+    .split(",")
+    .map((code) => code.trim())
+    .filter(Boolean);
+
+  if (meshCodes.length === 0) {
+    throw new CliError("--mesh が空です", ["例: --mesh \"53394525,53394526\""]);
+  }
+
+  const invalidCodes = meshCodes.filter((code) => !isValidMeshCode(code));
+  if (invalidCodes.length > 0) {
+    throw new CliError(
+      `不正なメッシュコード: ${invalidCodes.join(", ")}`,
+      [
+        "メッシュコードは4桁(1次), 6桁(2次), 8桁(3次), 9桁(半)のいずれかです。",
+        "例: --mesh \"53394525\" (新宿区付近の3次メッシュ)",
+      ],
+    );
+  }
+
+  const meshStatsId = options.meshStatsId ?? DATASETS.meshPopulation.statsDataId;
+
+  // キャッシュチェック
+  const cached = await loadMeshDataFromCache(meshStatsId, meshCodes);
+  let meshResult;
+
+  if (cached) {
+    console.log("メッシュデータ: キャッシュから読み込み");
+    const metaInfo = await loadMetaInfoWithCache(client, meshStatsId);
+    const { extractClassObjects, resolveAgeSelection, resolveLatestTime } = await import("./estat/meta");
+    const classObjs = extractClassObjects(metaInfo);
+    const ageSelection = resolveAgeSelection(classObjs, {
+      classId: options.classId,
+      totalCode: options.totalCode,
+      kidsCode: options.kidsCode,
+    });
+    const timeSelection = resolveLatestTime(classObjs, options.timeCode);
+    meshResult = {
+      data: cached,
+      timeLabel: `${timeSelection.code} (${timeSelection.label})`,
+      totalLabel: ageSelection.total.name,
+      kidsLabel: ageSelection.kids.name,
+      ageSelection,
+    };
+  } else {
+    const metaInfo = await loadMetaInfoWithCache(client, meshStatsId);
+    meshResult = await buildMeshData({
+      client,
+      statsDataId: meshStatsId,
+      meshCodes,
+      metaInfo,
+      selectors: {
+        classId: options.classId,
+        totalCode: options.totalCode,
+        kidsCode: options.kidsCode,
+      },
+      timeCode: options.timeCode,
+    });
+    await saveMeshDataToCache(meshStatsId, meshCodes, meshResult.data);
+  }
+
+  const rows = meshDataToReportRows(meshCodes, meshResult);
+  const outPath = resolveOutPath(options.out);
+
+  if (rows.length === 0) {
+    throw new CliError("指定メッシュコードのデータが取得できませんでした", [
+      "--mesh-stats-id が正しいか確認してください。",
+      `現在の statsDataId: ${meshStatsId}`,
+      "estat-report search --keyword \"地域メッシュ 人口\" で適切なIDを検索してください。",
+    ]);
+  }
+
+  let html: string;
+
+  if (options.scored) {
+    const preset = findPreset(options.preset) ?? CHILDCARE_FOCUSED;
+    const timeYear = meshResult.timeLabel.match(/\d{4}/)?.[0] ?? "不明";
+    const scoringInput = meshRowsToScoringInput(rows, timeYear, meshStatsId);
+    const results = scoreCities(scoringInput, POPULATION_INDICATORS, preset);
+
+    html = renderScoredReportHtml({
+      title: "メッシュ比較スコア レポート",
+      generatedAt: new Date().toLocaleString("ja-JP"),
+      cities: meshCodes,
+      statsDataId: meshStatsId,
+      timeLabel: meshResult.timeLabel,
+      preset,
+      results,
+      definitions: POPULATION_INDICATORS,
+      rawRows: rows,
+      hasPriceData: false,
+      hasCrimeData: false,
+      hasDisasterData: false,
+    });
+
+    console.log(`メッシュスコア付きPDFを出力しました: ${outPath}`);
+    console.log(`プリセット: ${preset.label}`);
+    for (const r of [...results].sort((a, b) => a.rank - b.rank)) {
+      console.log(`  ${r.rank}位: ${r.cityName} (スコア: ${r.compositeScore.toFixed(1)})`);
+    }
+  } else {
+    html = renderReportHtml({
+      title: "メッシュ比較レポート",
+      generatedAt: new Date().toLocaleString("ja-JP"),
+      statsDataId: meshStatsId,
+      timeLabel: meshResult.timeLabel,
+      totalLabel: meshResult.totalLabel,
+      kidsLabel: meshResult.kidsLabel,
+      classInfo: `${meshResult.ageSelection.classId}: メッシュモード`,
+      rows: [...rows],
+    });
+
+    console.log(`メッシュPDFを出力しました: ${outPath}`);
+  }
+
+  await renderPdfFromHtml(html, outPath);
+
+  console.log(`メッシュコード数: ${meshCodes.length}`);
+  console.log(`データ取得: ${rows.length}/${meshCodes.length} メッシュ`);
+  console.log(`時点: ${meshResult.timeLabel}`);
+}
+
+/** 駅圏モードのレポート生成 */
+async function handleStationReport(
+  client: EstatApiClient,
+  options: {
+    stations?: string;
+    radius: string;
+    meshStatsId?: string;
+    out?: string;
+    classId?: string;
+    totalCode?: string;
+    kidsCode?: string;
+    timeCode?: string;
+    scored?: boolean;
+    preset: string;
+  },
+): Promise<void> {
+  const stationNames = options.stations!
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean);
+
+  if (stationNames.length === 0) {
+    throw new CliError("--stations が空です", [
+      "例: --stations \"渋谷,新宿,池袋\"",
+    ]);
+  }
+
+  const radiusM = Number(options.radius);
+  if (!Number.isFinite(radiusM) || radiusM <= 0) {
+    throw new CliError("--radius は正の数値を指定してください", [
+      "例: --radius 1000 (1000メートル = 1km圏)",
+    ]);
+  }
+
+  // 駅名解決
+  const resolutions = resolveStations(stationNames);
+
+  // 各駅の圏内メッシュコードを列挙
+  const meshLevel = 3 as const; // 3次メッシュ（≒1km²）
+  const stationAreaInputs = resolutions.map((resolution) => {
+    const entry = resolution.entries[0];
+    const meshCodes = meshCodesInRadius(entry.lat, entry.lng, radiusM, meshLevel);
+    return {
+      stationName: resolution.stationName,
+      meshCodes,
+      lat: entry.lat,
+      lng: entry.lng,
+      areaCode: entry.areaCode,
+    };
+  });
+
+  // 全駅圏のメッシュコードを統合（重複除去）
+  const allMeshCodes = [
+    ...new Set(stationAreaInputs.flatMap((area) => [...area.meshCodes])),
+  ];
+
+  console.log(`駅圏解決: ${resolutions.map((r) => r.stationName).join(", ")}`);
+  console.log(`半径: ${radiusM}m, メッシュレベル: 3次, 合計メッシュ数: ${allMeshCodes.length}`);
+
+  const meshStatsId = options.meshStatsId ?? DATASETS.meshPopulation.statsDataId;
+
+  // キャッシュチェック + メッシュデータ取得
+  const cached = await loadMeshDataFromCache(meshStatsId, allMeshCodes);
+  let meshDataMap: ReadonlyMap<string, import("./mesh/types").MeshDataPoint>;
+  let timeLabel: string;
+
+  if (cached) {
+    console.log("メッシュデータ: キャッシュから読み込み");
+    meshDataMap = cached;
+
+    const metaInfo = await loadMetaInfoWithCache(client, meshStatsId);
+    const { extractClassObjects, resolveLatestTime } = await import("./estat/meta");
+    const classObjs = extractClassObjects(metaInfo);
+    const timeSelection = resolveLatestTime(classObjs, options.timeCode);
+    timeLabel = `${timeSelection.code} (${timeSelection.label})`;
+  } else {
+    const metaInfo = await loadMetaInfoWithCache(client, meshStatsId);
+    const meshResult = await buildMeshData({
+      client,
+      statsDataId: meshStatsId,
+      meshCodes: allMeshCodes,
+      metaInfo,
+      selectors: {
+        classId: options.classId,
+        totalCode: options.totalCode,
+        kidsCode: options.kidsCode,
+      },
+      timeCode: options.timeCode,
+    });
+    meshDataMap = meshResult.data;
+    timeLabel = meshResult.timeLabel;
+    await saveMeshDataToCache(meshStatsId, allMeshCodes, meshResult.data);
+  }
+
+  // 駅圏集約 → ReportRow
+  const rows = buildStationAreaRows(stationAreaInputs, meshDataMap, radiusM);
+  const outPath = resolveOutPath(options.out);
+
+  let html: string;
+
+  if (options.scored) {
+    const preset = findPreset(options.preset) ?? CHILDCARE_FOCUSED;
+    const dataYear = timeLabel.match(/\d{4}/)?.[0] ?? "不明";
+    const scoringInput = stationRowsToScoringInput(rows, dataYear, meshStatsId);
+    const results = scoreCities(scoringInput, POPULATION_INDICATORS, preset);
+
+    html = renderScoredReportHtml({
+      title: "駅圏比較スコア レポート",
+      generatedAt: new Date().toLocaleString("ja-JP"),
+      cities: stationNames.map((n) => `${n}駅`),
+      statsDataId: meshStatsId,
+      timeLabel,
+      preset,
+      results,
+      definitions: POPULATION_INDICATORS,
+      rawRows: rows,
+      hasPriceData: false,
+      hasCrimeData: false,
+      hasDisasterData: false,
+    });
+
+    console.log(`駅圏スコア付きPDFを出力しました: ${outPath}`);
+    console.log(`プリセット: ${preset.label}`);
+    for (const r of [...results].sort((a, b) => a.rank - b.rank)) {
+      console.log(`  ${r.rank}位: ${r.cityName} (スコア: ${r.compositeScore.toFixed(1)})`);
+    }
+  } else {
+    html = renderReportHtml({
+      title: "駅圏比較レポート",
+      generatedAt: new Date().toLocaleString("ja-JP"),
+      statsDataId: meshStatsId,
+      timeLabel,
+      totalLabel: "総人口",
+      kidsLabel: "0〜14歳",
+      classInfo: "駅圏モード（メッシュ集約）",
+      rows: [...rows],
+    });
+
+    console.log(`駅圏PDFを出力しました: ${outPath}`);
+  }
+
+  await renderPdfFromHtml(html, outPath);
+
+  console.log(`駅数: ${stationNames.length}`);
+  console.log(`時点: ${timeLabel}`);
+}
 
 program.parseAsync(process.argv).catch((error: unknown) => {
   console.error(formatError(error));
