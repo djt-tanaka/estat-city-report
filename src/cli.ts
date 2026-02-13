@@ -10,7 +10,10 @@ import { renderReportHtml } from "./report/html";
 import { renderScoredReportHtml } from "./report/templates/compose";
 import { renderPdfFromHtml } from "./report/pdf";
 import { scoreCities } from "./scoring";
-import { POPULATION_INDICATORS, findPreset, CHILDCARE_FOCUSED } from "./scoring/presets";
+import { POPULATION_INDICATORS, ALL_INDICATORS, findPreset, CHILDCARE_FOCUSED } from "./scoring/presets";
+import { ReinfoApiClient } from "./reinfo/client";
+import { buildPriceData } from "./reinfo/price-data";
+import { mergePriceIntoScoringInput } from "./reinfo/merge-scoring";
 import { ensureDir } from "./utils";
 
 dotenv.config();
@@ -34,12 +37,30 @@ function requireAppId(): string {
   return appId;
 }
 
+function requireReinfoApiKey(): string {
+  const key = process.env.REINFOLIB_API_KEY;
+  if (!key) {
+    throw new CliError(
+      "環境変数 REINFOLIB_API_KEY が未設定です",
+      [
+        "不動産情報ライブラリのAPIキーを取得して設定してください。",
+        "APIキー申請: https://www.reinfolib.mlit.go.jp/api/request/",
+        "価格データなしで実行する場合は --no-price を指定してください。",
+      ],
+      undefined,
+      2
+    );
+  }
+  return key;
+}
+
 program
   .command("init")
   .description("初期設定ファイルを生成")
   .action(async () => {
     const created = await writeInitFiles();
     await ensureDir(".cache/estat");
+    await ensureDir(".cache/reinfo");
     await ensureDir("out");
 
     if (created.length === 0) {
@@ -101,6 +122,9 @@ program
   .option("--timeCode <code>", "時間コード")
   .option("--scored", "スコア付きレポートを生成")
   .option("--preset <name>", "重みプリセット (childcare/price/safety)", "childcare")
+  .option("--year <YYYY>", "不動産取引データの年 (デフォルト: 前年)")
+  .option("--quarter <1-4>", "四半期 (1-4)")
+  .option("--no-price", "不動産価格データなしで実行")
   .action(
     async (options: {
       cities: string;
@@ -113,6 +137,9 @@ program
       timeCode?: string;
       scored?: boolean;
       preset: string;
+      year?: string;
+      quarter?: string;
+      price: boolean;
     }) => {
       const appId = requireAppId();
       const config = await loadConfig();
@@ -154,8 +181,37 @@ program
       if (options.scored) {
         const preset = findPreset(options.preset) ?? CHILDCARE_FOCUSED;
         const timeYear = reportData.timeLabel.match(/\d{4}/)?.[0] ?? "不明";
-        const scoringInput = toScoringInput(reportData, timeYear, resolved.statsDataId);
-        const results = scoreCities(scoringInput, POPULATION_INDICATORS, preset);
+        let scoringInput = toScoringInput(reportData, timeYear, resolved.statsDataId);
+        let definitions = POPULATION_INDICATORS;
+        let hasPriceData = false;
+        let enrichedRows = reportData.rows;
+
+        if (options.price) {
+          const reinfoKey = requireReinfoApiKey();
+          const reinfoClient = new ReinfoApiClient(reinfoKey);
+          const priceYear = options.year ?? String(new Date().getFullYear() - 1);
+          const areaCodes = reportData.rows.map((r) => r.areaCode);
+          const priceData = await buildPriceData(reinfoClient, areaCodes, priceYear, options.quarter);
+
+          if (priceData.size > 0) {
+            scoringInput = mergePriceIntoScoringInput(scoringInput, priceData);
+            definitions = ALL_INDICATORS;
+            hasPriceData = true;
+            enrichedRows = reportData.rows.map((row) => {
+              const stats = priceData.get(row.areaCode);
+              if (!stats) return row;
+              return {
+                ...row,
+                condoPriceMedian: Math.round(stats.median / 10000),
+                condoPriceQ25: Math.round(stats.q25 / 10000),
+                condoPriceQ75: Math.round(stats.q75 / 10000),
+                condoPriceCount: stats.count,
+              };
+            });
+          }
+        }
+
+        const results = scoreCities(scoringInput, definitions, preset);
 
         html = renderScoredReportHtml({
           title: "引っ越し先スコア レポート（子育て世帯向け）",
@@ -165,12 +221,16 @@ program
           timeLabel: reportData.timeLabel,
           preset,
           results,
-          definitions: POPULATION_INDICATORS,
-          rawRows: reportData.rows,
+          definitions,
+          rawRows: enrichedRows,
+          hasPriceData,
         });
 
         console.log(`スコア付きPDFを出力しました: ${reportData.outPath}`);
         console.log(`プリセット: ${preset.label}`);
+        if (hasPriceData) {
+          console.log("不動産価格データ: 有効");
+        }
         for (const r of [...results].sort((a, b) => a.rank - b.rank)) {
           console.log(`  ${r.rank}位: ${r.cityName} (スコア: ${r.compositeScore.toFixed(1)}, 信頼度: ${r.confidence.level})`);
         }

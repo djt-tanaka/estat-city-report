@@ -21,6 +21,41 @@ function numberFormat(value: number): string {
   return new Intl.NumberFormat("ja-JP").format(value);
 }
 
+/** 指標IDからReportRowの実値を取得するマッピング */
+function getRawValue(indicatorId: string, rawRow: ReportRow): number | null | undefined {
+  const mapping: Record<string, () => number | null | undefined> = {
+    population_total: () => rawRow.total,
+    kids_ratio: () => rawRow.ratio,
+    condo_price_median: () => rawRow.condoPriceMedian,
+  };
+  return mapping[indicatorId]?.() ?? undefined;
+}
+
+function formatRawValue(raw: number | null | undefined, def: IndicatorDefinition): string {
+  if (raw === null || raw === undefined) {
+    return "-";
+  }
+  return def.precision === 0 ? numberFormat(raw) : raw.toFixed(def.precision);
+}
+
+/** 価格のQ25-Q75レンジ行（存在する場合のみ） */
+function renderPriceRange(rawRow: ReportRow): string {
+  const q25 = rawRow.condoPriceQ25;
+  const q75 = rawRow.condoPriceQ75;
+  const count = rawRow.condoPriceCount;
+  if (q25 == null || q75 == null) {
+    return "";
+  }
+  const countDisplay = count != null ? `（取引件数: ${numberFormat(count)}件）` : "";
+  return `
+        <tr>
+          <td>├ 価格レンジ (Q25-Q75)</td>
+          <td class="num">${numberFormat(q25)} 〜 ${numberFormat(q75)} 万円${countDisplay}</td>
+          <td class="num">-</td>
+          <td class="num">-</td>
+        </tr>`;
+}
+
 export function renderCityDetail(model: CityDetailModel): string {
   const { result, rawRow } = model;
 
@@ -28,13 +63,9 @@ export function renderCityDetail(model: CityDetailModel): string {
     .map((def) => {
       const cs = result.choice.find((c) => c.indicatorId === def.id);
       const bs = result.baseline.find((b) => b.indicatorId === def.id);
-      const raw = rawRow[def.id === "population_total" ? "total" : "ratio" as keyof ReportRow];
-      const rawDisplay =
-        typeof raw === "number"
-          ? def.precision === 0
-            ? numberFormat(raw)
-            : raw.toFixed(def.precision)
-          : "-";
+      const raw = getRawValue(def.id, rawRow);
+      const rawDisplay = formatRawValue(raw, def);
+      const priceRange = def.id === "condo_price_median" ? renderPriceRange(rawRow) : "";
 
       return `
         <tr>
@@ -42,7 +73,7 @@ export function renderCityDetail(model: CityDetailModel): string {
           <td class="num">${rawDisplay} ${escapeHtml(def.unit)}</td>
           <td class="num">${cs ? cs.score.toFixed(1) : "-"}</td>
           <td class="num">${bs ? `${bs.percentile.toFixed(1)}%` : "-"}</td>
-        </tr>`;
+        </tr>${priceRange}`;
     })
     .join("\n");
 

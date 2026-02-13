@@ -6,6 +6,8 @@ import {
   ALL_PRESETS,
   findPreset,
   POPULATION_INDICATORS,
+  PRICE_INDICATORS,
+  ALL_INDICATORS,
 } from "../../src/scoring/presets";
 
 describe("プリセット定義", () => {
@@ -56,5 +58,31 @@ describe("POPULATION_INDICATORS", () => {
     for (const def of POPULATION_INDICATORS) {
       expect(def.category).toBe("childcare");
     }
+  });
+});
+
+describe("PRICE_INDICATORS", () => {
+  it("Phase 1用の価格指標が定義されている", () => {
+    expect(PRICE_INDICATORS.length).toBeGreaterThanOrEqual(1);
+    const ids = PRICE_INDICATORS.map((d) => d.id);
+    expect(ids).toContain("condo_price_median");
+  });
+
+  it("価格指標はlower_betterかつpriceカテゴリ", () => {
+    const condo = PRICE_INDICATORS.find((d) => d.id === "condo_price_median")!;
+    expect(condo.direction).toBe("lower_better");
+    expect(condo.category).toBe("price");
+    expect(condo.unit).toBe("万円");
+  });
+});
+
+describe("ALL_INDICATORS", () => {
+  it("全フェーズの指標を統合している", () => {
+    expect(ALL_INDICATORS.length).toBe(POPULATION_INDICATORS.length + PRICE_INDICATORS.length);
+  });
+
+  it("IDが一意", () => {
+    const ids = ALL_INDICATORS.map((d) => d.id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });
