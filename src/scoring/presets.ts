@@ -78,8 +78,21 @@ export const PRICE_INDICATORS: ReadonlyArray<IndicatorDefinition> = [
   },
 ];
 
-/** 全指標定義（Phase 0 + Phase 1） */
+/** Phase 2a: 犯罪統計の指標定義 */
+export const SAFETY_INDICATORS: ReadonlyArray<IndicatorDefinition> = [
+  {
+    id: "crime_rate",
+    label: "刑法犯認知件数（人口千人当たり）",
+    unit: "件/千人",
+    direction: "lower_better",
+    category: "safety",
+    precision: 2,
+  },
+];
+
+/** 全指標定義（Phase 0 + Phase 1 + Phase 2a） */
 export const ALL_INDICATORS: ReadonlyArray<IndicatorDefinition> = [
   ...POPULATION_INDICATORS,
   ...PRICE_INDICATORS,
+  ...SAFETY_INDICATORS,
 ];
