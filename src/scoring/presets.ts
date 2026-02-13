@@ -65,3 +65,21 @@ export const POPULATION_INDICATORS: ReadonlyArray<IndicatorDefinition> = [
     precision: 1,
   },
 ];
+
+/** Phase 1: 不動産価格の指標定義 */
+export const PRICE_INDICATORS: ReadonlyArray<IndicatorDefinition> = [
+  {
+    id: "condo_price_median",
+    label: "中古マンション価格（中央値）",
+    unit: "万円",
+    direction: "lower_better",
+    category: "price",
+    precision: 0,
+  },
+];
+
+/** 全指標定義（Phase 0 + Phase 1） */
+export const ALL_INDICATORS: ReadonlyArray<IndicatorDefinition> = [
+  ...POPULATION_INDICATORS,
+  ...PRICE_INDICATORS,
+];

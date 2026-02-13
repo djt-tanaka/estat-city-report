@@ -13,6 +13,7 @@ export default defineConfig({
         "src/report/pdf.ts",
         "src/types.ts",
         "src/scoring/types.ts",
+        "src/reinfo/types.ts",
       ],
       thresholds: {
         statements: 80,

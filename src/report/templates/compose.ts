@@ -18,6 +18,8 @@ export interface ScoredReportModel {
   readonly results: ReadonlyArray<CityScoreResult>;
   readonly definitions: ReadonlyArray<IndicatorDefinition>;
   readonly rawRows: ReadonlyArray<ReportRow>;
+  /** Phase 1: 不動産価格データが含まれるか */
+  readonly hasPriceData?: boolean;
 }
 
 /**
@@ -31,6 +33,7 @@ export function renderScoredReportHtml(model: ScoredReportModel): string {
     statsDataId: model.statsDataId,
     timeLabel: model.timeLabel,
     presetLabel: model.preset.label,
+    hasPriceData: model.hasPriceData,
   });
 
   const summary = renderSummary({
@@ -61,6 +64,7 @@ export function renderScoredReportHtml(model: ScoredReportModel): string {
     statsDataId: model.statsDataId,
     timeLabel: model.timeLabel,
     generatedAt: model.generatedAt,
+    hasPriceData: model.hasPriceData,
   });
 
   return `<!doctype html>

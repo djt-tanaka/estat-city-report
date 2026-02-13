@@ -73,6 +73,20 @@ describe("renderCover", () => {
     expect(html).toContain("新宿区");
     expect(html).toContain("子育て重視");
   });
+
+  it("価格データありの場合にデータソースを表示する", () => {
+    const html = renderCover({
+      title: "テスト",
+      generatedAt: "2026-02-13",
+      cities: ["新宿区"],
+      statsDataId: "0003448299",
+      timeLabel: "2020年",
+      presetLabel: "子育て重視",
+      hasPriceData: true,
+    });
+    expect(html).toContain("不動産情報ライブラリ API");
+    expect(html).toContain("e-Stat API");
+  });
 });
 
 describe("renderSummary", () => {
@@ -105,6 +119,41 @@ describe("renderCityDetail", () => {
     expect(html).toContain("13104");
     expect(html).toContain("50.0");
   });
+
+  it("価格指標を含む場合にQ25-Q75レンジを表示する", () => {
+    const defsWithPrice: ReadonlyArray<IndicatorDefinition> = [
+      ...definitions,
+      { id: "condo_price_median", label: "中古マンション価格（中央値）", unit: "万円", direction: "lower_better", category: "price", precision: 0 },
+    ];
+    const resultWithPrice: CityScoreResult = {
+      ...sampleResults[0],
+      choice: [
+        ...sampleResults[0].choice,
+        { indicatorId: "condo_price_median", score: 60 },
+      ],
+      baseline: [
+        ...sampleResults[0].baseline,
+        { indicatorId: "condo_price_median", percentile: 45, populationSize: 2, baselineName: "候補内" },
+      ],
+    };
+    const rawRowWithPrice = {
+      ...rawRows[0],
+      condoPriceMedian: 4000,
+      condoPriceQ25: 3000,
+      condoPriceQ75: 5000,
+      condoPriceCount: 50,
+    };
+    const html = renderCityDetail({
+      result: resultWithPrice,
+      definition: defsWithPrice,
+      rawRow: rawRowWithPrice,
+    });
+    expect(html).toContain("中古マンション価格");
+    expect(html).toContain("4,000");
+    expect(html).toContain("3,000");
+    expect(html).toContain("5,000");
+    expect(html).toContain("50件");
+  });
 });
 
 describe("renderDisclaimer", () => {
@@ -117,6 +166,19 @@ describe("renderDisclaimer", () => {
     expect(html).toContain("免責事項");
     expect(html).toContain("e-Stat");
     expect(html).toContain("0003448299");
+  });
+
+  it("価格データありの場合に不動産情報ライブラリの出典を表示する", () => {
+    const html = renderDisclaimer({
+      statsDataId: "0003448299",
+      timeLabel: "2020年",
+      generatedAt: "2026-02-13",
+      hasPriceData: true,
+    });
+    expect(html).toContain("不動産情報ライブラリ");
+    expect(html).toContain("XIT001");
+    expect(html).toContain("中古マンション価格");
+    expect(html).toContain("価格レンジ");
   });
 });
 

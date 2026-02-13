@@ -2,5 +2,6 @@ node_modules/
 dist/
 .cache/
 out/
+coverage/
 .env
 .DS_Store
