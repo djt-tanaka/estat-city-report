@@ -143,4 +143,148 @@ describe("buildReportData", () => {
     expect(result.timeLabel).toContain("2020000000");
     expect(result.timeLabel).toContain("2020年");
   });
+
+  it("cat02（男女）軸がある場合、cdCat02をAPIパラメータに追加する", async () => {
+    const metaWithCat02 = {
+      CLASS_INF: {
+        CLASS_OBJ: [
+          {
+            "@id": "area",
+            "@name": "地域事項",
+            CLASS: [{ "@code": "13104", "@name": "新宿区" }],
+          },
+          {
+            "@id": "time",
+            "@name": "時間軸（年次）",
+            CLASS: [{ "@code": "2020000000", "@name": "2020年" }],
+          },
+          {
+            "@id": "cat01",
+            "@name": "年齢分類",
+            CLASS: [
+              { "@code": "000", "@name": "総数" },
+              { "@code": "001", "@name": "0～14歳" },
+            ],
+          },
+          {
+            "@id": "cat02",
+            "@name": "男女",
+            CLASS: [
+              { "@code": "000", "@name": "総数" },
+              { "@code": "001", "@name": "男" },
+              { "@code": "002", "@name": "女" },
+            ],
+          },
+        ],
+      },
+    };
+
+    const client = {
+      getStatsData: vi.fn().mockImplementation((params: Record<string, string>) => {
+        // cdCat02 が "000"（総数）で指定されていることを検証
+        expect(params.cdCat02).toBe("000");
+        const catCode = params.cdCat01;
+        return Promise.resolve({
+          GET_STATS_DATA: {
+            STATISTICAL_DATA: {
+              DATA_INF: {
+                VALUE: [{
+                  "@area": "13104",
+                  "@time": "2020000000",
+                  "@cat01": catCode,
+                  "@cat02": "000",
+                  $: catCode === "000" ? "346235" : "32451",
+                }],
+              },
+            },
+          },
+        });
+      }),
+      getStatsList: vi.fn(),
+      getMetaInfo: vi.fn(),
+    };
+
+    const result = await buildReportData({
+      client: client as any,
+      statsDataId: "0003448299",
+      cityNames: ["新宿区"],
+      metaInfo: metaWithCat02,
+    });
+
+    const shinjuku = result.rows[0];
+    expect(shinjuku.total).toBe(346235);
+    expect(shinjuku.kids).toBe(32451);
+    expect(shinjuku.ratio).toBeCloseTo((32451 / 346235) * 100, 2);
+  });
+
+  it("tab（表章項目）軸がある場合、cdTabをAPIパラメータに追加する", async () => {
+    const metaWithTab = {
+      CLASS_INF: {
+        CLASS_OBJ: [
+          {
+            "@id": "area",
+            "@name": "地域事項",
+            CLASS: [{ "@code": "13104", "@name": "新宿区" }],
+          },
+          {
+            "@id": "time",
+            "@name": "時間軸（年次）",
+            CLASS: [{ "@code": "2020000000", "@name": "2020年" }],
+          },
+          {
+            "@id": "cat01",
+            "@name": "年齢分類",
+            CLASS: [
+              { "@code": "000", "@name": "総数" },
+              { "@code": "001", "@name": "0～14歳" },
+            ],
+          },
+          {
+            "@id": "tab",
+            "@name": "表章項目",
+            CLASS: [
+              { "@code": "010", "@name": "実数" },
+              { "@code": "020", "@name": "構成比" },
+            ],
+          },
+        ],
+      },
+    };
+
+    const client = {
+      getStatsData: vi.fn().mockImplementation((params: Record<string, string>) => {
+        // cdTab が "010"（実数）で指定されていることを検証
+        expect(params.cdTab).toBe("010");
+        const catCode = params.cdCat01;
+        return Promise.resolve({
+          GET_STATS_DATA: {
+            STATISTICAL_DATA: {
+              DATA_INF: {
+                VALUE: [{
+                  "@area": "13104",
+                  "@time": "2020000000",
+                  "@cat01": catCode,
+                  "@tab": "010",
+                  $: catCode === "000" ? "346235" : "32451",
+                }],
+              },
+            },
+          },
+        });
+      }),
+      getStatsList: vi.fn(),
+      getMetaInfo: vi.fn(),
+    };
+
+    const result = await buildReportData({
+      client: client as any,
+      statsDataId: "0003448299",
+      cityNames: ["新宿区"],
+      metaInfo: metaWithTab,
+    });
+
+    const shinjuku = result.rows[0];
+    expect(shinjuku.total).toBe(346235);
+    expect(shinjuku.kids).toBe(32451);
+  });
 });

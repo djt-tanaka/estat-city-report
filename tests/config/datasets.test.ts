@@ -9,8 +9,9 @@ describe("DATASETS", () => {
   it("population のセレクタが定義されている", () => {
     expect(DATASETS.population.selectors).toBeDefined();
     expect(DATASETS.population.selectors.classId).toBe("cat01");
-    expect(DATASETS.population.selectors.totalCode).toBe("000");
-    expect(DATASETS.population.selectors.kidsCode).toBe("001");
+    // totalCode/kidsCode は自動検出に委ねるため未定義
+    expect(DATASETS.population.selectors.totalCode).toBeUndefined();
+    expect(DATASETS.population.selectors.kidsCode).toBeUndefined();
   });
 
   it("crime の statsDataId は10桁の数字文字列", () => {
