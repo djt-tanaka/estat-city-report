@@ -14,6 +14,7 @@ npm link          # estat-report コマンドをグローバルに登録
 ```bash
 estat-report init
 # .env または環境変数で ESTAT_APP_ID を設定
+# 不動産価格・災害リスクデータも使う場合は REINFOLIB_API_KEY も設定
 ```
 
 > `estat-report init` が生成する `estat.config.json` にはデフォルトの統計表IDが設定済みです。通常は編集不要です。
@@ -24,10 +25,13 @@ estat-report init
 
 ```bash
 estat-report report --cities "新宿区,横浜市,大阪市"
-estat-report report --cities "新宿区,横浜市,大阪市" --scored --out ./out/report.pdf
+estat-report report --cities "新宿区,横浜市,大阪市" --out ./out/report.pdf
+estat-report report --cities "新宿区,横浜市,大阪市" --no-scored  # スコアなし基本レポート
 ```
 
+デフォルトでスコア付きレポート（人口・犯罪統計・不動産価格・災害リスク）を生成します。
 人口データ・犯罪統計のデータセットはビルトインで定義済みのため、`--statsDataId` の指定は不要です。
+不動産価格・災害リスクデータには `REINFOLIB_API_KEY` が必要です（未設定時は警告付きでスキップ）。
 
 ### search — 統計表の検索
 
@@ -59,7 +63,10 @@ npm run dev -- report --cities "新宿区,横浜市,大阪市"
 - `--statsDataId <ID>` (省略時はビルトインデフォルトを使用)
 - `--profile <name>` (`estat.config.json` の profile)
 - `--out <path>`
-- `--scored` (スコアリング付きレポート)
+- `--no-scored` (スコアなし基本レポートで生成)
+- `--no-price` (不動産価格データなしで実行)
+- `--no-crime` (犯罪統計データなしで実行)
+- `--no-disaster` (災害リスクデータなしで実行)
 - `--classId <id>` / `--totalCode <code>` / `--kidsCode <code>` (年齢分類を手動指定)
 - `--timeCode <code>` (時間軸を手動指定)
 - `--crimeStatsId <ID>` (犯罪統計の統計表IDを上書き)
@@ -84,14 +91,14 @@ npm run dev -- report --cities "新宿区,横浜市,大阪市"
     "population": {
       "statsDataId": "0003448299",
       "selectors": {
-        "classId": "cat01",
-        "totalCode": "000",
-        "kidsCode": "001"
+        "classId": "cat01"
       }
     }
   }
 }
 ```
+
+`totalCode`/`kidsCode` は自動検出されるため、通常は `classId` のみで十分です。
 
 ## キャッシュ
 

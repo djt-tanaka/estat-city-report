@@ -6,6 +6,7 @@ import { SelectorConfig } from "../config/config";
 import { EstatApiClient } from "./client";
 import {
   AgeSelection,
+  DefaultFilter,
   buildAreaEntries,
   extractClassObjects,
   extractDataValues,
@@ -13,6 +14,7 @@ import {
   resolveAgeSelection,
   resolveAreaClass,
   resolveCities,
+  resolveDefaultFilters,
   resolveLatestTime,
   valuesByArea
 } from "./meta";
@@ -45,12 +47,18 @@ async function fetchMetricByArea(args: {
   timeCode: string;
   ageSelection: AgeSelection;
   metricCode: string;
+  extraFilters: ReadonlyArray<DefaultFilter>;
 }): Promise<Map<string, number>> {
+  const extraParams = Object.fromEntries(
+    args.extraFilters.map((f) => [f.paramName, f.code])
+  );
+
   const response = await args.client.getStatsData({
     statsDataId: args.statsDataId,
     cdArea: args.areaCodes.join(","),
     cdTime: args.timeCode,
-    [args.ageSelection.paramName]: args.metricCode
+    [args.ageSelection.paramName]: args.metricCode,
+    ...extraParams,
   });
 
   const values = extractDataValues(response);
@@ -74,6 +82,10 @@ export async function buildReportData(input: BuildReportInput): Promise<BuildRep
 
   const areaCodes = cities.map((city) => city.code);
 
+  // area/time/指定cat以外のcat・tab分類（男女、表章項目等）の「総数」「実数」コードを導出
+  const excludeIds = new Set(["area", areaClass.id, "time", timeSelection.classId, ageSelection.classId]);
+  const extraFilters = resolveDefaultFilters(classObjs, excludeIds);
+
   const [totalMap, kidsMap] = await Promise.all([
     fetchMetricByArea({
       client: input.client,
@@ -81,7 +93,8 @@ export async function buildReportData(input: BuildReportInput): Promise<BuildRep
       areaCodes,
       timeCode: timeSelection.code,
       ageSelection,
-      metricCode: ageSelection.total.code
+      metricCode: ageSelection.total.code,
+      extraFilters,
     }),
     fetchMetricByArea({
       client: input.client,
@@ -89,7 +102,8 @@ export async function buildReportData(input: BuildReportInput): Promise<BuildRep
       areaCodes,
       timeCode: timeSelection.code,
       ageSelection,
-      metricCode: ageSelection.kids.code
+      metricCode: ageSelection.kids.code,
+      extraFilters,
     })
   ]);
 

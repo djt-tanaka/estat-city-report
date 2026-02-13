@@ -20,8 +20,6 @@ export const DATASETS = {
     label: "国勢調査 年齢（3区分）人口（令和2年）",
     selectors: {
       classId: "cat01",
-      totalCode: "000",
-      kidsCode: "001",
     },
   },
   /** 社会・人口統計体系 市区町村データ K安全（刑法犯認知件数） */

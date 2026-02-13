@@ -8,6 +8,7 @@ import {
   resolveAgeSelection,
   extractDataValues,
   valuesByArea,
+  resolveDefaultFilters,
 } from "../../src/estat/meta";
 import { CliError } from "../../src/errors";
 
@@ -317,5 +318,134 @@ describe("valuesByArea", () => {
     ];
     const map = valuesByArea(values, "2020000000");
     expect(map.size).toBe(0);
+  });
+
+  it("同一areaの重複値がある場合は最初の値を保持する", () => {
+    const values = [
+      { area: "13104", time: "2020000000", cats: { cat02: "000" }, value: 346235 },
+      { area: "13104", time: "2020000000", cats: { cat02: "001" }, value: 170000 },
+      { area: "13104", time: "2020000000", cats: { cat02: "002" }, value: 176235 },
+    ];
+    const map = valuesByArea(values, "2020000000");
+    expect(map.size).toBe(1);
+    expect(map.get("13104")).toBe(346235);
+  });
+});
+
+describe("resolveDefaultFilters", () => {
+  it("ageSelection以外のcat分類の「総数」コードを検出する", () => {
+    const classObjs = extractClassObjects({
+      CLASS_INF: {
+        CLASS_OBJ: [
+          areaClassObj,
+          timeClassObj,
+          ageClassObj,
+          {
+            "@id": "cat02",
+            "@name": "男女",
+            CLASS: [
+              { "@code": "000", "@name": "総数" },
+              { "@code": "001", "@name": "男" },
+              { "@code": "002", "@name": "女" },
+            ],
+          },
+        ],
+      },
+    });
+
+    const filters = resolveDefaultFilters(classObjs, new Set(["area", "time", "cat01"]));
+    expect(filters).toHaveLength(1);
+    expect(filters[0]).toEqual({ paramName: "cdCat02", code: "000" });
+  });
+
+  it("tab分類の「実数」を検出する", () => {
+    const classObjs = extractClassObjects({
+      CLASS_INF: {
+        CLASS_OBJ: [
+          areaClassObj,
+          timeClassObj,
+          ageClassObj,
+          {
+            "@id": "tab",
+            "@name": "表章項目",
+            CLASS: [
+              { "@code": "010", "@name": "実数" },
+              { "@code": "020", "@name": "構成比" },
+            ],
+          },
+        ],
+      },
+    });
+
+    const filters = resolveDefaultFilters(classObjs, new Set(["area", "time", "cat01"]));
+    expect(filters).toHaveLength(1);
+    expect(filters[0]).toEqual({ paramName: "cdTab", code: "010" });
+  });
+
+  it("cat02とtabの両方を同時に検出する", () => {
+    const classObjs = extractClassObjects({
+      CLASS_INF: {
+        CLASS_OBJ: [
+          areaClassObj,
+          timeClassObj,
+          ageClassObj,
+          {
+            "@id": "cat02",
+            "@name": "男女",
+            CLASS: [
+              { "@code": "000", "@name": "総数" },
+              { "@code": "001", "@name": "男" },
+            ],
+          },
+          {
+            "@id": "tab",
+            "@name": "表章項目",
+            CLASS: [
+              { "@code": "010", "@name": "実数" },
+              { "@code": "020", "@name": "構成比" },
+            ],
+          },
+        ],
+      },
+    });
+
+    const filters = resolveDefaultFilters(classObjs, new Set(["area", "time", "cat01"]));
+    expect(filters).toHaveLength(2);
+    expect(filters).toContainEqual({ paramName: "cdCat02", code: "000" });
+    expect(filters).toContainEqual({ paramName: "cdTab", code: "010" });
+  });
+
+  it("デフォルト候補がない分類は除外する", () => {
+    const classObjs = extractClassObjects({
+      CLASS_INF: {
+        CLASS_OBJ: [
+          areaClassObj,
+          timeClassObj,
+          ageClassObj,
+          {
+            "@id": "cat02",
+            "@name": "特殊分類",
+            CLASS: [
+              { "@code": "A", "@name": "カテゴリA" },
+              { "@code": "B", "@name": "カテゴリB" },
+            ],
+          },
+        ],
+      },
+    });
+
+    const filters = resolveDefaultFilters(classObjs, new Set(["area", "time", "cat01"]));
+    expect(filters).toHaveLength(0);
+  });
+
+  it("除外対象の分類はフィルタに含めない", () => {
+    const classObjs = extractClassObjects({
+      CLASS_INF: {
+        CLASS_OBJ: [areaClassObj, timeClassObj, ageClassObj],
+      },
+    });
+
+    const filters = resolveDefaultFilters(classObjs, new Set(["area", "time", "cat01"]));
+    expect(filters).toHaveLength(0);
   });
 });

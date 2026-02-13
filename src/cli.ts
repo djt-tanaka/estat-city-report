@@ -145,7 +145,7 @@ program
   .option("--totalCode <code>", "総数の分類コード")
   .option("--kidsCode <code>", "0〜14歳の分類コード")
   .option("--timeCode <code>", "時間コード")
-  .option("--scored", "スコア付きレポートを生成")
+  .option("--no-scored", "スコアなし基本レポートで生成")
   .option("--preset <name>", "重みプリセット (childcare/price/safety)", "childcare")
   .option("--year <YYYY>", "不動産取引データの年 (デフォルト: 前年)")
   .option("--quarter <1-4>", "四半期 (1-4)")
@@ -231,31 +231,35 @@ program
         const propertyTypeLabel = PROPERTY_TYPE_LABELS[propertyType];
 
         if (options.price) {
-          const reinfoKey = requireReinfoApiKey();
-          const reinfoClient = new ReinfoApiClient(reinfoKey);
-          const priceYear = options.year ?? String(new Date().getFullYear() - 1);
-          const areaCodes = reportData.rows.map((r) => r.areaCode);
-          const priceData = await buildPriceData(
-            reinfoClient, areaCodes, priceYear, options.quarter, propertyType, budgetLimit,
-          );
+          const reinfoKey = process.env.REINFOLIB_API_KEY;
+          if (!reinfoKey) {
+            console.log("REINFOLIB_API_KEY 未設定のため不動産価格データをスキップします。");
+          } else {
+            const reinfoClient = new ReinfoApiClient(reinfoKey);
+            const priceYear = options.year ?? String(new Date().getFullYear() - 1);
+            const areaCodes = reportData.rows.map((r) => r.areaCode);
+            const priceData = await buildPriceData(
+              reinfoClient, areaCodes, priceYear, options.quarter, propertyType, budgetLimit,
+            );
 
-          if (priceData.size > 0) {
-            scoringInput = mergePriceIntoScoringInput(scoringInput, priceData);
-            definitions = ALL_INDICATORS;
-            hasPriceData = true;
-            enrichedRows = reportData.rows.map((row) => {
-              const stats = priceData.get(row.areaCode);
-              if (!stats) return row;
-              return {
-                ...row,
-                condoPriceMedian: Math.round(stats.median / 10000),
-                condoPriceQ25: Math.round(stats.q25 / 10000),
-                condoPriceQ75: Math.round(stats.q75 / 10000),
-                condoPriceCount: stats.count,
-                affordabilityRate: stats.affordabilityRate ?? null,
-                propertyTypeLabel: stats.propertyTypeLabel ?? null,
-              };
-            });
+            if (priceData.size > 0) {
+              scoringInput = mergePriceIntoScoringInput(scoringInput, priceData);
+              definitions = ALL_INDICATORS;
+              hasPriceData = true;
+              enrichedRows = reportData.rows.map((row) => {
+                const stats = priceData.get(row.areaCode);
+                if (!stats) return row;
+                return {
+                  ...row,
+                  condoPriceMedian: Math.round(stats.median / 10000),
+                  condoPriceQ25: Math.round(stats.q25 / 10000),
+                  condoPriceQ75: Math.round(stats.q75 / 10000),
+                  condoPriceCount: stats.count,
+                  affordabilityRate: stats.affordabilityRate ?? null,
+                  propertyTypeLabel: stats.propertyTypeLabel ?? null,
+                };
+              });
+            }
           }
         }
 
@@ -289,25 +293,29 @@ program
         let hasDisasterData = false;
 
         if (options.disaster) {
-          const reinfoKey = requireReinfoApiKey();
-          const disasterClient = new ReinfoApiClient(reinfoKey);
-          const areaCodes = reportData.rows.map((r) => r.areaCode);
-          const disasterData = await buildDisasterData(disasterClient, areaCodes);
+          const reinfoKey = process.env.REINFOLIB_API_KEY;
+          if (!reinfoKey) {
+            console.log("REINFOLIB_API_KEY 未設定のため災害リスクデータをスキップします。");
+          } else {
+            const disasterClient = new ReinfoApiClient(reinfoKey);
+            const areaCodes = reportData.rows.map((r) => r.areaCode);
+            const disasterData = await buildDisasterData(disasterClient, areaCodes);
 
-          if (disasterData.size > 0) {
-            scoringInput = mergeDisasterIntoScoringInput(scoringInput, disasterData);
-            definitions = ALL_INDICATORS;
-            hasDisasterData = true;
-            enrichedRows = enrichedRows.map((row) => {
-              const data = disasterData.get(row.areaCode);
-              if (!data) return row;
-              return {
-                ...row,
-                floodRisk: data.floodRisk,
-                landslideRisk: data.landslideRisk,
-                evacuationSiteCount: data.evacuationSiteCount,
-              };
-            });
+            if (disasterData.size > 0) {
+              scoringInput = mergeDisasterIntoScoringInput(scoringInput, disasterData);
+              definitions = ALL_INDICATORS;
+              hasDisasterData = true;
+              enrichedRows = enrichedRows.map((row) => {
+                const data = disasterData.get(row.areaCode);
+                if (!data) return row;
+                return {
+                  ...row,
+                  floodRisk: data.floodRisk,
+                  landslideRisk: data.landslideRisk,
+                  evacuationSiteCount: data.evacuationSiteCount,
+                };
+              });
+            }
           }
         }
 
